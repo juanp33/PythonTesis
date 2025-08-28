@@ -1,0 +1,12 @@
+DECLARACIÓN JURADA
+
+Yo, {{NOMBRE_DECLARANTE}}, titular de la cédula de identidad Nº {{CI_DECLARANTE}}, con domicilio real en {{DOMICILIO_DECLARANTE}}, por la presente DECLARO BAJO JURAMENTO que:
+
+{{CUERPO_DECLARACION}}
+
+Manifiesto que la presente declaración se realiza en carácter de {{CARACTER_DECLARACION}}, y que toda la información consignada es veraz, comprometiéndome a responder por su falsedad conforme a lo dispuesto en la legislación vigente.
+
+En {{CIUDAD}}, a los {{FECHA_DECLARACION}}.
+
+FIRMA: ______________________________  
+{{NOMBRE_DECLARANTE}}

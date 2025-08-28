@@ -1,0 +1,30 @@
+SEÑOR JUEZ LETRADO DE PRIMERA INSTANCIA EN LO CIVIL DE {{CIUDAD}} TURNO.
+
+{{NOMBRE_ACTOR}}, titular de la cédula de identidad Nº {{CI_ACTOR}}, con domicilio real en {{DOMICILIO_REAL_ACTOR}}, constituyendo domicilio procesal en {{DOMICILIO_PROCESAL_ACTOR}} y domicilio electrónico {{DOMICILIO_ELECTRONICO_ACTOR}}, al Señor Juez me presento y digo:
+
+Que vengo a promover juicio de {{TIPO_DE_JUICIO}}, contra {{NOMBRE_DEMANDADO}}, domiciliado en {{DOMICILIO_DEMANDADO}}, en mérito a las siguientes consideraciones de hecho y fundamentos de derecho:
+
+I)  
+II)  
+III)  
+
+HECHOS  
+{{DETALLE_HECHOS}}
+
+PRUEBA  
+A efectos de acreditar los hechos expuestos, ofrezco el diligenciamiento de los siguientes medios probatorios:  
+I)  
+II)  
+III)  
+
+DERECHO  
+Fundo el derecho en {{FUNDAMENTO_DERECHO}}.
+
+PETITORIO  
+Por lo expuesto al Señor Juez pido:  
+1.- Se me tenga por presentado con los documentos acompañados, denunciado el domicilio real, constituido el procesal y electrónico y por acreditada la representación invocada.  
+2.- {{PETICION_2}}  
+3.- {{PETICION_3}}  
+
+1º Otrosí digo: Que autorizo al profesional patrocinante y a {{AUTORIZADOS}} en los términos de los arts. 85, 90 y 105 a 107 del C.G.P.  
+2º Otrosí digo: Que en virtud de lo dispuesto por el art. 71 inciso B de la Ley 17.738 se repone la vicésima correspondiente a 3 BPC.

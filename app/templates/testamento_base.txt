@@ -1,0 +1,19 @@
+SEÑOR JUEZ LETRADO DE PRIMERA INSTANCIA EN LO CIVIL DE {{CIUDAD}} TURNO.
+
+Yo, {{NOMBRE_TESTADOR}}, titular de la cédula de identidad Nº {{CI_TESTADOR}}, con domicilio real en {{DOMICILIO_REAL_TESTADOR}}, en pleno uso de mis facultades mentales y de mi libre voluntad, otorgo el presente TESTAMENTO, el cual contiene mis últimas voluntades, de acuerdo a lo dispuesto en las leyes vigentes.
+
+PRIMERO: Instituyo como herederos universales a {{HEREDEROS}}, quienes recibirán en partes iguales todos los bienes, derechos y acciones que me pertenezcan al momento de mi fallecimiento.
+
+SEGUNDO: Lego de forma particular los siguientes bienes:  
+I) {{LEGADO_1}}  
+II) {{LEGADO_2}}  
+III) {{LEGADO_3}}
+
+TERCERO: Designo como albacea a {{ALBACEA}}, a quien confiero todas las facultades necesarias para el cumplimiento de las disposiciones de este testamento.
+
+CUARTO: Manifiesto que este testamento revoca cualquier otro otorgado con anterioridad.
+
+En fe de lo cual, firmo el presente testamento en {{CIUDAD}}, a los {{FECHA_OTORGAMIENTO}}.
+
+FIRMA: ______________________________
+{{NOMBRE_TESTADOR}}

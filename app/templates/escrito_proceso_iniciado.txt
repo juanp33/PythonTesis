@@ -1,0 +1,7 @@
+SEÑOR JUEZ LETRADO DE PRIMERA INSTANCIA EN LO CIVIL DE {{CIUDAD}} TURNO.
+
+{{NOMBRE_COMPARECIENTE}}, titular de la cédula de identidad Nº {{CI_COMPARECIENTE}}, en su calidad de {{CALIDAD_JURIDICA}}, en representación de {{NOMBRE_REPRESENTADO}}, C.I./RUT Nº {{CI_O_RUT_REPRESENTADO}}, según {{DOCUMENTO_RESPALDO}}, con domicilio real en {{DOMICILIO_REAL}}, constituyendo domicilio procesal en {{DOMICILIO_PROCESAL}}, y domicilio electrónico {{DOMICILIO_ELECTRONICO}}, en autos caratulados: "{{CARATULA}}" IUE {{IUE}}, al Señor Juez me presento y digo:
+
+Que vengo por medio del presente a {{OBJETO_ESCRITO}}.
+
+OTROSÍ DIGO: Que autorizo a {{AUTORIZADOS}} en los términos de los arts. 85, 90 y 105 a 107 del C.G.P.
