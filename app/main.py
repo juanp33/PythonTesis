@@ -13,14 +13,16 @@ from fpdf import FPDF
 from pydub import AudioSegment
 from PIL import Image
 import os
+from docx import Document
+from fastapi.responses import StreamingResponse
+import io
 # ---------- App & CORS ----------
 app = FastAPI()
 
 origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=r"https?://localhost:\d+",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,7 +38,7 @@ DEFAULT_TEMPLATES = {
 }
 
 # 🚨 API KEY fija (tuya)
-client = OpenAI(api_key=OS.getenv("APIGPT"))
+client = OpenAI(api_key=os.getenv("APIGPT"))
 
 # HuggingFace diarización (opcional)
 diarization_pipeline = Pipeline.from_pretrained(
@@ -225,35 +227,35 @@ async def transcribir_diarizado(audio: UploadFile = File(...)):
     raw_text = transcription.text.strip()
 
     # 2. Diarización con GPT-5
-    prompt = f"""
-Eres un asistente jurídico que organiza transcripciones de audios judiciales.
-El siguiente texto es una transcripción cruda.
-Asigna nombres/roles apropiados a cada hablante, si reconoces el nombre del participante por ejemplo : Pedro gonzalez unicamente coloca el nombre y no el rol (Juez, Fiscal, Testigo, Abogado, Acusado, etc).
-Formato esperado:
+#     prompt = f"""
+# Eres un asistente jurídico que organiza transcripciones de audios judiciales.
+# El siguiente texto es una transcripción cruda.
+# Asigna nombres/roles apropiados a cada hablante, si reconoces el nombre del participante por ejemplo : Pedro gonzalez unicamente coloca el nombre y no el rol (Juez, Fiscal, Testigo, Abogado, Acusado, etc).
+# Formato esperado:
 
-Rol o nombre: texto
-Rol o nombre: texto
-...
+# Rol o nombre: texto
+# Rol o nombre: texto
+# ...
 
-Texto transcrito:
-{raw_text}
-    """
+# Texto transcrito:
+# {raw_text}
+#     """
 
-    resp = client.chat.completions.create(
-        model="gpt-5",
-        messages=[{"role": "user", "content": prompt}],
-        max_completion_tokens=4096,
-    )
+#     resp = client.chat.completions.create(
+#         model="gpt-5",
+#         messages=[{"role": "user", "content": prompt}],
+#         max_completion_tokens=4096,
+#     )
 
-    diarized_text = resp.choices[0].message.content.strip()
+#     diarized_text = resp.choices[0].message.content.strip()
 
-    return {"conversacion": diarized_text}
+    return {"conversacion": raw_text}
 
 # =============== WebSocket live chat ===============
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    history = [{"role": "system", "content": "Eres un asistente legal especializado en derecho uruguayo y argentino."}]
+    history = [{"role": "system", "content": "Eres un asistente legal especializado en derecho uruguayo ."}]
     try:
         while True:
             data = await websocket.receive_text()
@@ -306,4 +308,83 @@ async def ocr_archivo_con_texto(archivo: UploadFile = File(...)):
     finally:
         # ⚠️ Importante: no borramos tmpdir inmediatamente porque se necesita leer el PDF en FileResponse
         # FastAPI eliminará el archivo cuando termine la request.
+        pass
+@app.post("/resumir_documentos/")
+async def resumir_documentos(
+    files: List[UploadFile] = File(..., description="Lista de documentos a resumir"),
+    ocr: bool = Form(True)
+):
+    informes = []
+
+    tmpdir = tempfile.mkdtemp(prefix="resumenes_")
+    try:
+        for idx, uf in enumerate(files, start=1):
+            # Guardar archivo temporal
+            raw_path = os.path.join(tmpdir, uf.filename)
+            async with aiofiles.open(raw_path, "wb") as f:
+                data = await uf.read()
+                await f.write(data)
+
+            # Extraer texto (PDF o texto plano)
+            if uf.filename.lower().endswith(".pdf"):
+                text = extract_text_from_pdf(raw_path)
+            else:
+                try:
+                    text = Path(raw_path).read_text(encoding="utf-8", errors="ignore")
+                except:
+                    text = ""
+
+            # Resumir con GPT
+            prompt = f"""
+            Resumí brevemente el siguiente documento en un párrafo claro y conciso.
+            Documento: {uf.filename}
+
+            Contenido:
+            {text[:10000]}  # limitar por seguridad
+            """
+            resp = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=600
+            )
+            resumen = resp.choices[0].message.content.strip()
+
+            informes.append({
+                "nombre": uf.filename,
+                "resumen": resumen
+            })
+
+        # Construir informe consolidado
+        informe_final = "\n\n".join(
+            [f"📄 {i['nombre']}\nResumen: {i['resumen']}" for i in informes]
+        )
+
+        return {"documentos": informes, "informe_final": informe_final}
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    
+@app.post("/convertir_documento/")
+async def convertir_documento(
+    file: UploadFile = File(...),
+    formato_salida: str = Form(..., regex="^(pdf|txt|docx)$")
+):
+    tmpdir = tempfile.mkdtemp(prefix="convert_")
+    try:
+        input_path = Path(tmpdir) / file.filename
+        async with aiofiles.open(input_path, "wb") as f:
+            data = await file.read()
+            await f.write(data)
+
+        output_path = Path(tmpdir) / f"convertido.{formato_salida}"
+
+        # Provisoriamente: copiar el archivo original
+        shutil.copy(str(input_path), str(output_path))
+
+        return FileResponse(
+            output_path,
+            media_type="application/octet-stream",
+            filename=f"convertido.{formato_salida}"
+        )
+    finally:
         pass

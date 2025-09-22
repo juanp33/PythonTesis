@@ -1,3 +1,12 @@
 fastapi
 uvicorn
-python-dotenv
+python-multipart
+PyPDF2
+ocrmypdf
+pyannote.audio
+openai
+pydantic
+fpdf
+pydub
+Pillow
+aiofiles
