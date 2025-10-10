@@ -16,9 +16,16 @@ import os
 from docx import Document
 from fastapi.responses import StreamingResponse
 import io
+import fitz 
+from docx import Document
+from fpdf import FPDF
+import httpx, asyncio, tempfile
+from sse_starlette.sse import EventSourceResponse
+from bs4 import BeautifulSoup
+import json
 # ---------- App & CORS ----------
 app = FastAPI()
-
+REDACCION_CHATS: Dict[str, Dict[str, Any]] = {}
 origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 app.add_middleware(
     CORSMiddleware,
@@ -27,7 +34,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+class RedaccionChatStart(BaseModel):
+    documento_inicial: str
+    evidence_id: Optional[str] = None
 # ---------- Config ----------
 DEFAULT_TEMPLATES = {
     "Demanda": "app/templates/demanda_base.txt",
@@ -108,98 +117,103 @@ def generar_pdf(path: str, messages: list[dict]):
     pdf.output(path)
 
 # =============== Chat API ===============
-class ChatStartRequest(BaseModel):
-    documento_inicial: str
+chat_history = {}
+SPRINGBOOT_URL = "http://localhost:8080/api/messages"
+SYSTEM_PROMPT = (
+    "Eres un asistente jurídico especializado en legislación uruguaya. "
+    "Debes responder como un abogado experto en derecho uruguayo, citando leyes, decretos y artículos aplicables. "
+    "Si un usuario menciona una ley, decreto o resolución por número (por ejemplo, 'Ley 12234' o 'Decreto 456/2012'), "
+    "debes devolver un JSON con la acción de búsqueda, sin explicar nada todavía. "
+    "El formato exacto debe ser: "
+    '{"action":"fetch_page","url":"https://www.impo.com.uy/bases/leyes/{numero_de_ley}","keyword":"{numero_de_ley}"} '
+    "(reemplazando {numero_de_ley} por el número real mencionado). "
+    "Si el número es un decreto, usá la URL https://www.impo.com.uy/bases/decretos/{numero}. "
+    "Si el usuario no menciona una norma específica, responde normalmente en texto plano. "
+    "Nunca digas que no tenés acceso en línea: si se trata de una ley uruguaya, asumí que puedes generar la URL oficial."
+)
+async def persist_to_spring(chat_id, message, response, files):
+    async with httpx.AsyncClient() as http_client:
+        data = {
+            "chat_id": chat_id,
+            "message": message,
+            "response": response,
+        }
 
-@app.post("/chatbot/start/")
-async def start_chat(req: ChatStartRequest):
-    chat_id = str(uuid.uuid4())
-    chats[chat_id] = {
-        "messages": [
-            {"role": "system", "content": "Sos un asistente legal que redacta en estilo jurídico formal."},
-            {"role": "assistant", "content": req.documento_inicial}
-        ],
-        "pdf_path": str(PDF_DIR / f"{chat_id}.pdf"),
-    }
-    generar_pdf(chats[chat_id]["pdf_path"], chats[chat_id]["messages"])
-    return {"chat_id": chat_id, "respuesta": req.documento_inicial}
+        # Armamos la lista de archivos correctamente
+        files_data = []
+        for path in files:
+            files_data.append(("files", (path.name, open(path, "rb"), "application/octet-stream")))
 
-class ChatMessageRequest(BaseModel):
-    chat_id: str
-    mensaje_usuario: str
+        await http_client.post(SPRINGBOOT_URL, data=data, files=files_data)
 
-@app.post("/chatbot/message/")
-async def send_message(req: ChatMessageRequest):
-    if req.chat_id not in chats:
-        raise HTTPException(404, "Chat no encontrado")
 
-    chats[req.chat_id]["messages"].append({"role": "user", "content": req.mensaje_usuario})
 
-    resp = client.chat.completions.create(
-        model="gpt-5",   # ✅ ahora GPT-5
-        messages=chats[req.chat_id]["messages"],
-        max_completion_tokens=4096,
-    )
-    answer = resp.choices[0].message.content
-    chats[req.chat_id]["messages"].append({"role": "assistant", "content": answer})
-    generar_pdf(chats[req.chat_id]["pdf_path"], chats[req.chat_id]["messages"])
-    return {"respuesta": answer}
 
-@app.post("/chatbot/upload/{chat_id}")
-async def upload_file(chat_id: str, evidence_files: List[UploadFile] = File(...)):
-    if chat_id not in chats:
-        raise HTTPException(404, "Chat no encontrado")
+def scrape_page(url: str) -> str:
+    """Descarga y limpia el texto de una página web."""
+    try:
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+        text = soup.get_text(separator="\n")
+        # Limitar longitud para evitar contextos enormes
+        return text[:15000]
+    except Exception as e:
+        return f"Error al intentar acceder a {url}: {e}"
 
-    text = await build_evidence_text(evidence_files)
-    user_msg = f"📎 Usuario subió archivo(s):\n{text[:500]}..."
-    chats[chat_id]["messages"].append({"role": "user", "content": user_msg})
 
-    resp = client.chat.completions.create(
-        model="gpt-5",   # ✅ ahora GPT-5
-        messages=chats[chat_id]["messages"],
-        max_completion_tokens=4096,
-    )
-    answer = resp.choices[0].message.content
-    chats[chat_id]["messages"].append({"role": "assistant", "content": answer})
-    generar_pdf(chats[chat_id]["pdf_path"], chats[chat_id]["messages"])
-    return {"respuesta": answer}
-
-@app.post("/chatbot/send/")
-async def send_chat_message(
+@app.post("/chat/stream")
+async def chat_stream(
     chat_id: str = Form(...),
-    mensaje_usuario: str = Form(""),
-    archivo: UploadFile | None = File(None),
+    message: str = Form(...),
+    files: list[UploadFile] = File(default=None)
 ):
-    if chat_id not in chats:
-        raise HTTPException(404, "Chat no encontrado")
+    tmpdir = tempfile.mkdtemp(prefix="chat_")
+    saved_files = []
+    for file in (files or []):
+        path = Path(tmpdir) / file.filename
+        with open(path, "wb") as f:
+            f.write(await file.read())
+        saved_files.append(path)
 
-    user_msg = mensaje_usuario.strip()
+    chat_history.setdefault(chat_id, [{"role": "system", "content": SYSTEM_PROMPT}])
+    chat_history[chat_id].append({"role": "user", "content": message})
 
-    if archivo:
-        tmp_path = f"uploads/{archivo.filename}"
-        os.makedirs("uploads", exist_ok=True)
-        with open(tmp_path, "wb") as f:
-            f.write(await archivo.read())
-        user_msg += f"\n📎 Archivo adjunto: {archivo.filename}"
-
-    chats[chat_id]["messages"].append({"role": "user", "content": user_msg})
-
-    resp = client.chat.completions.create(
-        model="gpt-5",   # ✅ ahora GPT-5
-        messages=chats[chat_id]["messages"],
-        max_completion_tokens=4096,
+    # Primera respuesta: ver si GPT pide una fuente externa
+    response = client.chat.completions.create(
+        model="gpt-5",
+        messages=chat_history[chat_id]
     )
-    answer = resp.choices[0].message.content
-    chats[chat_id]["messages"].append({"role": "assistant", "content": answer})
-    generar_pdf(chats[chat_id]["pdf_path"], chats[chat_id]["messages"])
+    content = response.choices[0].message.content.strip()
 
-    return {"respuesta": answer, "user_msg": user_msg}
+    # Intentamos interpretar si GPT devolvió JSON con acción fetch_page
+    try:
+        parsed = json.loads(content)
+        if parsed.get("action") == "fetch_page" and parsed.get("url"):
+            url = parsed["url"]
+            keyword = parsed.get("keyword", "")
+            scraped_text = scrape_page(url)
 
-@app.get("/chatbot/pdf/{chat_id}")
-async def get_pdf(chat_id: str):
-    if chat_id not in chats:
-        raise HTTPException(404, "Chat no encontrado")
-    return FileResponse(chats[chat_id]["pdf_path"], media_type="application/pdf")
+            # Segunda consulta: GPT analiza el contenido descargado
+            followup = client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "Eres un abogado uruguayo, resume y explica el texto legal proporcionado."},
+                    {"role": "user", "content": f"Palabra clave: {keyword}\n\nTexto extraído de {url}:\n{scraped_text}"}
+                ]
+            )
+            full_response = followup.choices[0].message.content
+        else:
+            full_response = content
+    except json.JSONDecodeError:
+        # No era JSON, GPT respondió directamente
+        full_response = content
+
+    # Guardamos en el historial y en SpringBoot
+    chat_history[chat_id].append({"role": "assistant", "content": full_response})
+    await persist_to_spring(chat_id, message, full_response, saved_files)
+
+    return {"response": full_response}
 
 # =============== Transcripción + Diarización ===============
 @app.post("/transcribir_diarizado/")
@@ -336,16 +350,16 @@ async def resumir_documentos(
 
             # Resumir con GPT
             prompt = f"""
-            Resumí brevemente el siguiente documento en un párrafo claro y conciso.
+            Resumí lo más detalladamente posible el siguiente documento en un párrafo claro y conciso.
             Documento: {uf.filename}
 
             Contenido:
-            {text[:10000]}  # limitar por seguridad
+            {text[:100000]}  # limitar por seguridad
             """
             resp = client.chat.completions.create(
                 model="gpt-5-mini",
                 messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=600
+                max_completion_tokens=6000
             )
             resumen = resp.choices[0].message.content.strip()
 
@@ -354,11 +368,7 @@ async def resumir_documentos(
                 "resumen": resumen
             })
 
-        # Construir informe consolidado
-        informe_final = "\n\n".join(
-            [f"📄 {i['nombre']}\nResumen: {i['resumen']}" for i in informes]
-        )
-
+        informe_final = "\n\n".join([f"Documento: {inf['nombre']}\nResumen: {inf['resumen']}" for inf in informes])
         return {"documentos": informes, "informe_final": informe_final}
 
     finally:
@@ -378,13 +388,230 @@ async def convertir_documento(
 
         output_path = Path(tmpdir) / f"convertido.{formato_salida}"
 
-        # Provisoriamente: copiar el archivo original
-        shutil.copy(str(input_path), str(output_path))
+        ext_origen = input_path.suffix.lower()
+
+        # PDF → TXT
+        if ext_origen == ".pdf" and formato_salida == "txt":
+            text = ""
+            with fitz.open(input_path) as pdf:
+                for page in pdf:
+                    text += page.get_text()
+            output_path.write_text(text, encoding="utf-8")
+
+        # DOCX → TXT
+        elif ext_origen == ".docx" and formato_salida == "txt":
+            doc = Document(input_path)
+            text = "\n".join(p.text for p in doc.paragraphs)
+            output_path.write_text(text, encoding="utf-8")
+
+        # TXT → PDF
+        elif ext_origen == ".txt" and formato_salida == "pdf":
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            with open(input_path, "r", encoding="utf-8") as txt:
+                for line in txt:
+                    pdf.cell(200, 10, txt=line.encode("latin-1", "replace").decode("latin-1"), ln=True)
+            pdf.output(str(output_path))
+
+        # TXT → DOCX
+        elif ext_origen == ".txt" and formato_salida == "docx":
+            text = input_path.read_text(encoding="utf-8")
+            doc = Document()
+            for line in text.splitlines():
+                doc.add_paragraph(line)
+            doc.save(str(output_path))
+
+        # Si el formato de entrada y salida son iguales o no hay conversión
+        else:
+            shutil.copy(str(input_path), str(output_path))
 
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
             filename=f"convertido.{formato_salida}"
         )
+
     finally:
         pass
+# ==================== CHAT DE REDACCIÓN ====================
+
+PDF_DIR = Path("pdfs")
+PDF_DIR.mkdir(exist_ok=True)
+EVIDENCES: Dict[str, str] = {}
+REDACCION_CHATS: Dict[str, Dict[str, Any]] = {}
+
+@app.post("/redaccion_documento/")
+async def redaccion_documento(
+    document_type: str = Form(...),
+    instructions: str = Form(""),
+    template_file: Optional[UploadFile] = File(None),
+    evidence_files: Optional[List[UploadFile]] = File(None),
+):
+    """Genera el primer borrador jurídico completo."""
+    tmpdir = tempfile.mkdtemp(prefix="redaccion_")
+    try:
+        base_text = ""
+        if template_file:
+            path = os.path.join(tmpdir, template_file.filename)
+            async with aiofiles.open(path, "wb") as f:
+                await f.write(await template_file.read())
+            base_text = Path(path).read_text(encoding="utf-8", errors="ignore").strip()
+
+        evidence_text = ""
+        if evidence_files:
+            for ev in evidence_files:
+                evidence_text += f"\n- {ev.filename}"
+
+        prompt = f"""
+Redactá un documento jurídico completo de tipo **{document_type}**, siguiendo lenguaje jurídico uruguayo formal.
+Tené en cuenta, en ningún caso podés inventar hechos o datos no provistos y si se quiere hacer referencia a una evidencia esta debe ser adjuntada directamente en el documento, es decir nunca hacer referencia a un pdf externo.
+• Instrucciones: {instructions or '[sin instrucciones]'}
+• Evidencias: {evidence_text or '[sin evidencias]'}
+• Plantilla base: {base_text or '[sin plantilla]'}
+El resultado debe ser un escrito jurídico formal y coherente, sin comentarios externos.
+"""
+
+        completion = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {"role": "system", "content": "Sos un abogado uruguayo experto en derecho civil y procesal."},
+                {"role": "user", "content": prompt},
+            ],
+            max_completion_tokens=10096,
+        )
+
+        generated_text = completion.choices[0].message.content.strip()
+
+        evidence_id = str(uuid.uuid4())
+        pdf_path = PDF_DIR / f"redaccion_{evidence_id}.pdf"
+
+        # Genera PDF con el texto inicial
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.multi_cell(0, 10, generated_text.encode("latin-1", "replace").decode("latin-1"))
+        pdf.output(str(pdf_path))
+
+        EVIDENCES[evidence_id] = evidence_text
+
+        return {
+            "generated_text": completion,
+            "evidence_id": evidence_id,
+            "pdf_url": f"http://127.0.0.1:8000/redaccion_chat/pdf/{evidence_id}",
+        }
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.post("/redaccion_chat/start/")
+async def redaccion_chat_start(req: dict):
+    """Inicia un chat con el documento ya generado."""
+    chat_id = str(uuid.uuid4())
+    REDACCION_CHATS[chat_id] = {
+        "texto_actual": req["documento_inicial"],
+        "pdf_path": str(PDF_DIR / f"redaccion_{req.get('evidence_id', chat_id)}.pdf"),
+        "evidencia_text": EVIDENCES.get(req.get("evidence_id", ""), ""),
+    }
+
+    return {
+        "chat_id": chat_id,
+        "respuesta": "✅ Documento generado correctamente. Ya podés empezar a editarlo.",
+        "pdf_url": f"http://127.0.0.1:8000/redaccion_chat/pdf/{req.get('evidence_id', chat_id)}",
+    }
+
+
+@app.post("/redaccion_chat/message/")
+async def redaccion_chat_message(req: dict):
+    """
+    Recibe instrucciones de modificación del usuario, actualiza el documento,
+    y devuelve el feedback textual del chatbot + el nuevo PDF.
+    """
+    chat_id = req["chat_id"]
+    mensaje = req["mensaje_usuario"]
+
+    if chat_id not in REDACCION_CHATS:
+        raise HTTPException(404, "Chat no encontrado")
+
+    chat = REDACCION_CHATS[chat_id]
+    texto_actual = chat["texto_actual"]
+
+    # 🧠 Instrucciones para GPT
+    prompt = f"""
+El siguiente texto es un documento jurídico uruguayo en proceso de redacción.
+Debés aplicar la instrucción del usuario al documento, manteniendo su tono formal y estructura.
+Después de modificar el documento, explicá brevemente (en 2-3 oraciones) qué cambios realizaste.
+
+Primero devolvé el nuevo documento completo bajo la etiqueta [DOCUMENTO].
+Luego devolvé un resumen breve o confirmación bajo la etiqueta [CHATBOT].
+
+Documento actual:
+---
+{texto_actual}
+---
+
+Instrucción del usuario:
+---
+{mensaje}
+---
+
+Evidencias relevantes:
+---
+{chat.get('evidencia_text', '[sin evidencias]')}
+---
+"""
+
+    completion = client.chat.completions.create(
+        model="gpt-5",
+        messages=[
+            {"role": "system", "content": "Sos un abogado uruguayo experto en redacción de documentos jurídicos."},
+            {"role": "user", "content": prompt},
+        ],
+        max_completion_tokens=4096,
+    )
+   
+    full_response = completion.choices[0].message.content.strip()
+    print (full_response)
+    # 🧩 Separar el documento del feedback
+    new_text = ""
+    feedback = "✅ Documento actualizado."
+    if "[DOCUMENTO]" in full_response:
+        parts = full_response.split("[CHATBOT]")
+        new_text = parts[0].replace("[DOCUMENTO]", "").strip()
+        if len(parts) > 1:
+            feedback = parts[1].strip()
+            chat["texto_actual"] = new_text
+
+    # 📄 Regenerar PDF actualizado
+            pdf_path = Path(chat["pdf_path"])
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 10, new_text.encode("latin-1", "replace").decode("latin-1"))
+            pdf.output(str(pdf_path))
+
+    else:
+        # fallback si el modelo no respetó las etiquetas
+        new_text = full_response
+        feedback = "Ocurrió un error al interpretar la respuesta del modelo."
+
+    # 🖋️ Actualizar texto del documento en memoria
+
+    # 🔁 Responder al frontend
+    return {
+        "respuesta": feedback,  # 💬 esto se muestra en el chat
+        "pdf_url": f"http://127.0.0.1:8000/redaccion_chat/pdf/{chat_id}",
+    }
+
+@app.get("/redaccion_chat/pdf/{chat_id}")
+async def redaccion_chat_get_pdf(chat_id: str):
+    """Devuelve el PDF actual del documento."""
+    if chat_id in REDACCION_CHATS:
+        path = REDACCION_CHATS[chat_id]["pdf_path"]
+    else:
+        path = PDF_DIR / f"redaccion_{chat_id}.pdf"
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="PDF no encontrado")
+
+    return FileResponse(path, media_type="application/pdf")
