@@ -1,28 +1,34 @@
-import os, tempfile, aiofiles, shutil, uuid
-from typing import List, Optional, Dict, Any
+import os
+import io
+import csv
+import json
+import uuid
+import shutil
+import asyncio
+import tempfile
+import requests
+import httpx
+
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from typing import List, Optional, Dict, Any
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+from sse_starlette.sse import EventSourceResponse
 from PyPDF2 import PdfReader
-import ocrmypdf
 from pyannote.audio import Pipeline
 from openai import OpenAI
 from pydantic import BaseModel
 from fpdf import FPDF
 from pydub import AudioSegment
 from PIL import Image
-import os
-from docx import Document
-from fastapi.responses import StreamingResponse
-import io
-import fitz 
-from docx import Document
-from fpdf import FPDF
-import httpx, asyncio, tempfile
-from sse_starlette.sse import EventSourceResponse
 from bs4 import BeautifulSoup
-import json
+import fitz  # PyMuPDF para PDFs
+import docx
+import ocrmypdf
+import aiofiles
 # ---------- App & CORS ----------
 app = FastAPI()
 REDACCION_CHATS: Dict[str, Dict[str, Any]] = {}
@@ -131,21 +137,76 @@ SYSTEM_PROMPT = (
     "Si el usuario no menciona una norma específica, responde normalmente en texto plano. "
     "Nunca digas que no tenés acceso en línea: si se trata de una ley uruguaya, asumí que puedes generar la URL oficial."
 )
-async def persist_to_spring(chat_id, message, response, files):
-    async with httpx.AsyncClient() as http_client:
+
+SPRINGBOOT_URL = "http://localhost:8080/api/messages/save"
+
+async def persist_to_spring(
+    chat_id: str,
+    message: str,
+    response: str,
+    files: list[Path],
+    token: str | None = None
+):
+    # 🔑 Normalizar token (evitar set/list)
+    if isinstance(token, (set, list, tuple)):
+        token = next(iter(token), None)
+
+    headers = {}
+    if token:
+        headers["Authorization"] = str(token).strip()
+
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
+        # 🧩 Campos del mensaje
         data = {
-            "chat_id": chat_id,
-            "message": message,
-            "response": response,
+            "chatId": chat_id,
+            "userMessage": message,
+            "assistantResponse": response,
         }
 
-        # Armamos la lista de archivos correctamente
+        # 🧩 Construir lista de archivos
         files_data = []
-        for path in files:
-            files_data.append(("files", (path.name, open(path, "rb"), "application/octet-stream")))
+        for file_path in files:
+            if Path(file_path).exists():
+                f = open(file_path, "rb")
+                files_data.append(
+                    ("files", (Path(file_path).name, f, "application/octet-stream"))
+                )
 
-        await http_client.post(SPRINGBOOT_URL, data=data, files=files_data)
+        # ⚠️ Si no hay archivos, agregar dummy vacío para forzar multipart/form-data
+        if not files_data:
+            dummy_file = io.BytesIO(b"")
+            files_data = [("files", ("", dummy_file, "application/octet-stream"))]
 
+        # 🧪 Crear request manual para inspeccionar encabezados
+        req = httpx.Request("POST", SPRINGBOOT_URL, headers=headers, data=data, files=files_data)
+        print("\n" + "=" * 70)
+        print(f"📤 ENVIANDO CHAT {chat_id} A SPRING BOOT")
+        print(f"🔗 URL: {SPRINGBOOT_URL}")
+        print(f"🔑 Authorization: {headers.get('Authorization')}")
+        print(f"📦 Payload: {json.dumps(data, indent=2, ensure_ascii=False)}")
+        print(f"📁 Archivos adjuntos: {[f[1][0] for f in files_data]}")
+        print(f"🧾 Content-Type que se enviará: {req.headers.get('content-type')}")
+        print("=" * 70 + "\n")
+
+        # 🚀 Enviar al backend
+        try:
+            res = await http_client.send(req)
+            print(f"📥 Código de respuesta: {res.status_code}")
+            print(f"📜 Respuesta del servidor (primeros 300 chars): {res.text[:300]}")
+
+            if res.status_code != 200:
+                print(f"⚠️ Error al persistir chat {chat_id}: {res.status_code} -> {res.text}")
+            else:
+                print(f"✅ Chat {chat_id} persistido correctamente en Spring Boot")
+
+        except httpx.RequestError as e:
+            print(f"❌ Error de conexión al servidor Spring Boot: {e}")
+
+        finally:
+            # 🧹 Cerrar archivos abiertos
+            for _, (name, f, _) in files_data:
+                if hasattr(f, "close") and not f.closed:
+                    f.close()
 
 
 
@@ -164,29 +225,64 @@ def scrape_page(url: str) -> str:
 
 @app.post("/chat/stream")
 async def chat_stream(
+    request: Request,
     chat_id: str = Form(...),
     message: str = Form(...),
     files: list[UploadFile] = File(default=None)
+    
 ):
+    # 1️⃣ Capturar token JWT del frontend
+    token = request.headers.get("Authorization")
+
+    # 2️⃣ Crear directorio temporal para los archivos
     tmpdir = tempfile.mkdtemp(prefix="chat_")
     saved_files = []
+    file_summaries = []
+
     for file in (files or []):
         path = Path(tmpdir) / file.filename
-        with open(path, "wb") as f:
-            f.write(await file.read())
+        content = await file.read()
         saved_files.append(path)
+        with open(path, "wb") as f:
+            f.write(content)
 
+        # Interpretar tipos de archivo comunes
+        text_content = ""
+        if file.filename.endswith(".txt"):
+            text_content = content.decode("utf-8", errors="ignore")
+        elif file.filename.endswith(".pdf"):
+            pdf = fitz.open(stream=content, filetype="pdf")
+            for page in pdf:
+                text_content += page.get_text()
+        elif file.filename.endswith(".docx"):
+            doc = docx.Document(io.BytesIO(content))
+            text_content = "\n".join(p.text for p in doc.paragraphs)
+        elif file.filename.endswith(".csv"):
+            text_content = io.StringIO(content.decode("utf-8", errors="ignore")).read()
+        else:
+            text_content = f"[Archivo {file.filename}: tipo no soportado]"
+
+        if len(text_content) > 6000:
+            text_content = text_content[:6000] + "\n...[texto truncado]"
+
+        file_summaries.append(f"📄 **{file.filename}**:\n{text_content}")
+
+    # 3️⃣ Combinar texto del usuario + archivos
+    user_input = message
+    if file_summaries:
+        user_input += "\n\nArchivos adjuntos:\n" + "\n\n".join(file_summaries)
+
+    # 4️⃣ Contexto del chat
     chat_history.setdefault(chat_id, [{"role": "system", "content": SYSTEM_PROMPT}])
-    chat_history[chat_id].append({"role": "user", "content": message})
+    chat_history[chat_id].append({"role": "user", "content": user_input})
 
-    # Primera respuesta: ver si GPT pide una fuente externa
+    # 5️⃣ Llamar al modelo GPT-5
     response = client.chat.completions.create(
         model="gpt-5",
         messages=chat_history[chat_id]
     )
     content = response.choices[0].message.content.strip()
 
-    # Intentamos interpretar si GPT devolvió JSON con acción fetch_page
     try:
         parsed = json.loads(content)
         if parsed.get("action") == "fetch_page" and parsed.get("url"):
@@ -194,7 +290,6 @@ async def chat_stream(
             keyword = parsed.get("keyword", "")
             scraped_text = scrape_page(url)
 
-            # Segunda consulta: GPT analiza el contenido descargado
             followup = client.chat.completions.create(
                 model="gpt-5",
                 messages=[
@@ -206,13 +301,13 @@ async def chat_stream(
         else:
             full_response = content
     except json.JSONDecodeError:
-        # No era JSON, GPT respondió directamente
         full_response = content
 
-    # Guardamos en el historial y en SpringBoot
+    # 6️⃣ Guardar respuesta en memoria y persistir en Spring Boot
     chat_history[chat_id].append({"role": "assistant", "content": full_response})
-    await persist_to_spring(chat_id, message, full_response, saved_files)
+    await persist_to_spring(chat_id, message, full_response, saved_files, token)
 
+    # 7️⃣ Devolver respuesta al frontend
     return {"response": full_response}
 
 # =============== Transcripción + Diarización ===============
