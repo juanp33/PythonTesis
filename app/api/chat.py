@@ -17,7 +17,7 @@ async def persist_to_spring(chat_id, message, response):
     async with httpx.AsyncClient() as client_http:
         await client_http.post(SPRINGBOOT_URL, data={"chat_id": chat_id, "message": message, "response": response})
 
-@router.post("/")
+@router.post("/stream")
 async def chat_stream(chat_id: str = Form(...), message: str = Form(...)):
     chat_history.setdefault(chat_id, [{"role": "system", "content": SYSTEM_PROMPT}])
     chat_history[chat_id].append({"role": "user", "content": message})

@@ -1,29 +1,37 @@
 # app/main.py
+import logging, sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 
-# Crear la aplicación principal
-app = FastAPI(
-    title="Asistente IA Legal",
-    description="API del proyecto PythonTesis - sistema inteligente para abogados",
-    version="1.0.0"
-)
+# ---- Logging global a stdout ----
+root = logging.getLogger()
+if not root.handlers:
+    h = logging.StreamHandler(sys.stdout)
+    h.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
+    root.addHandler(h)
+root.setLevel(logging.DEBUG)  # o INFO
 
-# Configuración de CORS (permitir peticiones desde el frontend)
+log = logging.getLogger("app.main")
+log.info("🚀 main.py cargado")
+
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Podés restringirlo a tu dominio si querés más adelante
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Registrar todas las rutas definidas en app/api/router.py
+# Montás TODOS tus routers (incluido transcripción)
 app.include_router(api_router)
 
-# Endpoint de prueba para ver si el servidor responde
-@app.get("/")
-def read_root():
-    return {"message": "Servidor en funcionamiento ✅"}
+@app.on_event("startup")
+async def startup():
+    log.info("✅ Startup OK (routers montados)")
 
+@app.get("/health")
+def health():
+    log.info("🩺 /health")
+    return {"ok": True}
