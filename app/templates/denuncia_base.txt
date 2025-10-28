@@ -1,0 +1,79 @@
+PLANTILLA DE DENUNCIA PENAL (URUGUAY)
+
+JUZGADO LETRADO DE PRIMERA INSTANCIA EN LO PENAL DE [DEPARTAMENTO] DE TURNO
+SUMA: Notitia criminis — [delito o descripción breve]
+
+[NOMBRE COMPLETO DEL/A DENUNCIANTE], C.I. [], [nacionalidad], [estado civil], mayor de edad, con domicilio real en [], teléfono [], correo [], en ejercicio de [patria potestad / representación / propio derecho], comparece y dice:
+
+I. HECHOS
+
+Fecha y hora: El día [//] a las [:______] horas.
+
+Lugar: [dirección exacta o referencia].
+
+Modo de ocurrencia: [narrar concreta y cronológicamente qué pasó, quiénes intervinieron, cómo, con qué medios].
+
+Personas involucradas (si se conocen): [nombre, cargo o rasgos], domicilio laboral o real [], teléfonos [].
+
+Consecuencias y riesgos: [daños, afectación a integridad, patrimonio, menores, etc.].
+
+Actuaciones posteriores: [denuncia administrativa, llamados, tickets, comunicaciones].
+
+Sugerencia de redacción: hechos en párrafos cortos, fechas absolutas, datos verificables, sin calificaciones subjetivas.
+
+II. DERECHO
+
+Tipificación tentativa: Los hechos podrían configurar el delito de [delito], previsto en el art. [____] del Código Penal.
+
+Garantías y derechos afectados: [p. ej., derecho a la integridad, a la propiedad, al acceso a servicios esenciales si aplica].
+
+Normativa aplicable (ejemplos — reemplazar según el caso):
+
+Constitución de la República, art. [__] [describir brevemente el derecho].
+
+Código Penal, arts. [__] [encuadre típico].
+
+[Leyes/Decretos/Reglamentos] pertinentes.
+
+Nota práctica: si el caso refiere a servicios esenciales, consignar la base constitucional y la doctrina/jurisprudencia pertinente que impide interrupciones que vulneren derechos fundamentales.
+
+III. PRUEBA
+
+Documental: [facturas, tickets, constancias, correos, capturas, llamados, contratos].
+
+Testifical: [nombres, teléfonos, qué pueden acreditar].
+
+Pericial / Técnica: [pericia informática, relevamiento, inspección ocular].
+
+Diligencias a impulsar por Fiscalía/Policía:
+
+Oficios a [empresa/organismo] para remitir registros de [visitas, llamadas, cortes, logs, CCTV].
+
+Geolocalización / cámaras del entorno [direcciones precisas, fechas y franjas horarias].
+
+Requerir identificación de intervinientes y protocolos internos aplicados.
+
+IV. PETITORIO
+
+Se solicita:
+
+Tener por presentada la denuncia y por constituido el domicilio electrónico.
+
+Dar trámite y remitir a Fiscalía de turno a efectos de dirigir la investigación.
+
+Disponer diligencias indicadas en el punto III.4 y las que V.S. estime pertinentes.
+
+Citar e identificar a los presuntos responsables.
+
+Oportunamente, formalizar la investigación si corresponde.
+
+V. AUTORIZACIONES Y NOTIFICACIONES
+
+Se autoriza a [nombre/s y C.I.] a notificarse, presentar y retirar documentación en mi nombre.
+Constituye domicilio a estos efectos en [domicilio y correo].
+
+[Ciudad], [fecha].
+
+Firma: ___________________________
+Aclaración: ______________________
+C.I.: _____________________________

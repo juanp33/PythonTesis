@@ -45,6 +45,7 @@ async def redaccion_documento(
                 "Escrito": "escrito_proceso_iniciado.txt",
                 "Declaración Jurada": "declaracion_jurada_base.txt",
                 "Testamento": "testamento_base.txt",
+                "Denuncia": "denuncia_base.txt",
             }
             template_name = template_map.get(document_type)
             if template_name:
@@ -100,12 +101,12 @@ No inventes hechos ni datos no provistos.
 """
 
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {"role": "system", "content": "Sos un abogado uruguayo experto en derecho civil y procesal."},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=16000,
+            
         )
 
         generated_text = completion.choices[0].message.content.strip()
@@ -194,12 +195,12 @@ Evidencias del caso a usar si son necesarias:
 """
 
     completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5",
         messages=[
             {"role": "system", "content": "Sos un abogado uruguayo experto en redacción jurídica."},
             {"role": "user", "content": prompt},
-        ],
-        max_completion_tokens=4096,
+        ]
+        
     )
 
     full_response = completion.choices[0].message.content.strip()
